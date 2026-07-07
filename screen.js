@@ -17,7 +17,7 @@
     'use strict';
 
     var PLUGIN_ID = 'bossfight';
-    var PLUGIN_VERSION = '0.2.1'; // keep in sync with plugin.json
+    var PLUGIN_VERSION = '0.2.2'; // keep in sync with plugin.json
 
     // ------------------------------------------------------------------
     // three.js loader — vendored ES module under assets/. Resolve relative
@@ -505,6 +505,12 @@
         if (this.settings.shake) this._shake = Math.max(this._shake, 0.25);
     };
 
+    BossFightGame.prototype._markScorer = function () {
+        if (this._sawScorer) return;
+        this._sawScorer = true;
+        console.info('[bossfight] real note verdicts detected, auto-hit disengaged');
+    };
+
     BossFightGame.prototype._judge = function (now, getNoteState, mirrored) {
         var i, ev, raw, state;
 
@@ -519,7 +525,7 @@
                 ev = this._probation[i].ev;
                 raw = getNoteState(ev.note, ev.chordTime);
                 if (raw && (typeof raw === 'string' ? raw : raw.state)) {
-                    this._sawScorer = true;
+                    this._markScorer();
                     this._probation.length = 0;
                     break;
                 }
@@ -540,7 +546,7 @@
                 raw = getNoteState(ev.note, ev.chordTime);
                 if (raw) {
                     state = typeof raw === 'string' ? raw : raw.state;
-                    if (state) this._sawScorer = true;
+                    if (state) this._markScorer();
                 }
             }
             var resolved = null;
@@ -892,6 +898,11 @@
         var chartDt = Math.max(0, Math.min(0.5, now - this._lastNow));
         this._lastNow = now;
 
+        if (!this._loggedApi) {
+            this._loggedApi = true;
+            console.info('[bossfight] v' + PLUGIN_VERSION + ' active; note-state API '
+                + (typeof bundle.getNoteState === 'function' ? 'available' : 'MISSING (host too old, hit detection cannot work)'));
+        }
         if (bundle.isReady !== false) {
             this._judge(now, bundle.getNoteState, mirrored);
         }
