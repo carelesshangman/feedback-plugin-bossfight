@@ -32,6 +32,14 @@
 (function () {
   'use strict';
 
+  // ?hp=25 → weaker bosses so archetype cycling is quick to observe
+  // ?speed=3 → chart time runs 3× real time (smooth per-frame steps, unlike
+  //            a seek, so judging/streaks behave normally — just faster)
+  var params = new URLSearchParams(location.search);
+  var hpParam = parseInt(params.get('hp'), 10);
+  if (hpParam > 0) window.__bossfightOverrides = { baseHp: hpParam };
+  var timeScale = parseFloat(params.get('speed')) || 1;
+
   // ---------------- synthetic chart ----------------
   var BPM = 120, BEAT = 60 / BPM, SONG_LEN = 180;
   var STRINGS = 6;
@@ -143,7 +151,7 @@
 
   (function tick() {
     var wall = pauseAt !== null ? pauseAt : performance.now();
-    bundle.currentTime = (wall - t0) / 1000;
+    bundle.currentTime = ((wall - t0) / 1000) * timeScale;
     if (bundle.currentTime > SONG_LEN - 4) restart();
     inst.draw(bundle);
     requestAnimationFrame(tick);

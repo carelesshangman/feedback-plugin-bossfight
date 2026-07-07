@@ -9,13 +9,20 @@ through the foreground; **The Gravelord** looms in the background.
 ## Gameplay
 
 - **Streaks attack.** Every 5 consecutive correct notes hurls a rock at the boss; damage scales
-  with the length of your streak. Drop the boss's HP to zero and it dies — then respawns a level
-  higher with 30% more HP.
-- **The boss fights back, on the beat.** Every 8 measures the boss winds up (`⚠ INCOMING RIFF`)
-  and launches a boulder at *you*. It launches on the downbeat and lands exactly 4 beats later.
-  Play that riff cleanly (no misses, at least half the notes hit) and the boulder is **deflected**
-  back into the boss for heavy counter-damage. Flub it and you get **crushed** — screen flash,
-  camera shake, streak gone.
+  with the length of your streak. Drop the boss's HP to zero and it dies — then the next
+  archetype spawns a level higher with 30% more HP.
+- **Three boss archetypes**, cycling as levels climb, each with its own silhouette, palette and
+  beat-synced attack:
+  - **The Gravelord** — one huge boulder: launches on the downbeat, lands 4 beats later.
+  - **Storm Wraith** — a volley of three rocks launched on consecutive beats, each in flight
+    for 3 beats (overlapping riff windows).
+  - **Pyre Fiend** — two heavy meteors dropped from overhead, fast 2-beat flights back to back.
+- Every projectile launches on a beat and lands on a beat. Play the riff under its flight
+  cleanly (no misses, at least half the notes hit) and it is **deflected** back into the boss
+  for heavy counter-damage. Flub it and you get **crushed** — screen flash, camera shake,
+  streak gone.
+- **Enrage:** below 35% HP the boss's eyes burn brighter and it attacks every 4 measures
+  instead of every 8.
 - A miss anywhere breaks your streak and makes the boss's eyes flare.
 - The strike line pulses on every beat.
 
@@ -52,6 +59,9 @@ npm run demo        # serves on http://localhost:8137
 
 Keys: **Space** pause · **M** fumble (forces misses for 1.5 s — get crushed by the next boulder) ·
 **R** restart.
+
+URL params: `?hp=20` (weaker bosses, quick level cycling) · `?speed=4` (chart time runs 4× —
+handy for watching all archetypes fast).
 
 ## How it works
 

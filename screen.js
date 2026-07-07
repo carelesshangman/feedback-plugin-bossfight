@@ -51,6 +51,19 @@
     var BOSS_Z = -46;
     var BOSS_BASE_HP = 100;
 
+    // Boss archetypes — cycle as levels climb. Each has its own silhouette,
+    // palette and beat-synced attack pattern:
+    //  - boulder: one big rock, launches on the downbeat, lands 4 beats later
+    //  - volley:  three smaller rocks launched on consecutive beats, each in
+    //             flight for 3 beats (overlapping riff windows)
+    //  - meteor:  two heavy rocks dropped from overhead, 2-beat flights
+    //             back to back
+    var BOSS_DEFS = [
+        { name: 'THE GRAVELORD', body: 0x3d2a55, eye: 0xff7722, light: 0xff5522, geo: 'ico', scaleY: 1.25, attack: 'boulder' },
+        { name: 'STORM WRAITH', body: 0x1c3a4d, eye: 0x66e0ff, light: 0x3388ff, geo: 'octa', scaleY: 1.7, attack: 'volley' },
+        { name: 'PYRE FIEND', body: 0x542020, eye: 0xffd633, light: 0xff3300, geo: 'dodeca', scaleY: 1.05, attack: 'meteor' }
+    ];
+
     // Rocksmith-style string colours, low string (s=0) upward.
     var STRING_COLORS = [0xef4444, 0xfacc15, 0x3b82f6, 0xf97316, 0x22c55e, 0xa855f7, 0x14b8a6, 0xe879f9];
 
@@ -93,22 +106,27 @@
         this._judgeIdx = 0;        // first event not yet resolved
         this._lastNow = -1e9;
         this._sawScorer = false;
+        this._probation = [];      // auto-hit notes still being re-queried for a real verdict
 
         // combat state
+        var overrides = (typeof window !== 'undefined' && window.__bossfightOverrides) || {};
         this.streak = 0;
         this.bestStreak = 0;
         this.level = 1;
-        this.bossMaxHp = BOSS_BASE_HP;
-        this.bossHp = BOSS_BASE_HP;
+        this.bossMaxHp = overrides.baseHp > 0 ? overrides.baseHp : BOSS_BASE_HP;
+        this.bossHp = this.bossMaxHp;
         this.bossState = 'alive';  // alive | dying | spawning
         this._bossStateT = 0;
         this._bossFlash = 0;
+        this._raged = false;       // < 35% HP → attacks twice as often
 
         this.rocks = [];
         this._lanes = 6;
 
-        // beat-synced boss attack (boulder thrown AT the player)
-        this.attack = null;
+        // beat-synced boss attacks (projectiles thrown AT the player)
+        this.attacks = [];
+        this._attackBatch = 0;
+        this._warnedBatch = -1;
         this._beatsRef = null;
         this._beatIdx = 0;         // pointer for beat-pulse tracking
         this._attackScanIdx = 0;   // pointer for attack scheduling
@@ -121,6 +139,7 @@
         this._buildNotePool();
         this._buildParticles();
         this._buildHud();
+        this._applyBossDef(BOSS_DEFS[0]);
     }
 
     BossFightGame.prototype._track = function (obj) {
@@ -176,11 +195,18 @@
         var THREE = this.THREE;
         var boss = new THREE.Group();
 
+        // one geometry per archetype, created once — _applyBossDef swaps refs
+        this._bossGeos = {
+            ico: this._track(new THREE.IcosahedronGeometry(4.2, 1)),
+            octa: this._track(new THREE.OctahedronGeometry(4.6, 1)),
+            dodeca: this._track(new THREE.DodecahedronGeometry(4.4, 0))
+        };
         this._bossBodyMat = this._mat({ color: 0x3d2a55, roughness: 0.65, flatShading: true, emissive: 0x000000 });
-        var body = new THREE.Mesh(this._track(new THREE.IcosahedronGeometry(4.2, 1)), this._bossBodyMat);
+        var body = new THREE.Mesh(this._bossGeos.ico, this._bossBodyMat);
         body.position.y = 6.5;
         body.scale.y = 1.25;
         boss.add(body);
+        this._bossBody = body;
 
         var head = new THREE.Mesh(this._track(new THREE.IcosahedronGeometry(1.9, 0)), this._bossBodyMat);
         head.position.y = 12.2;
@@ -220,6 +246,22 @@
         boss.position.set(0, 0, BOSS_Z);
         this.scene.add(boss);
         this.boss = boss;
+
+        // shared projectile geometry/material — tinted per archetype
+        this._boulderGeo = this._track(new THREE.DodecahedronGeometry(1.6, 1));
+        this._boulderMat = this._mat({ color: 0x6b5f52, roughness: 0.85, flatShading: true, emissive: 0xff3300, emissiveIntensity: 0.25 });
+    };
+
+    BossFightGame.prototype._applyBossDef = function (def) {
+        this._bossDef = def;
+        this._bossBody.geometry = this._bossGeos[def.geo] || this._bossGeos.ico;
+        this._bossBody.scale.set(1, def.scaleY, 1);
+        this._bossBodyMat.color.setHex(def.body);
+        this._eyeMat.emissive.setHex(def.eye);
+        this.bossLight.color.setHex(def.light);
+        this._boulderMat.emissive.setHex(def.light);
+        this._raged = false;
+        this._hudBossName.textContent = def.name + (this.level > 1 ? '  ✦ LV ' + this.level : '');
     };
 
     BossFightGame.prototype._buildHighway = function (lanes) {
@@ -416,10 +458,11 @@
     BossFightGame.prototype._resetJudging = function (now) {
         this._judgeIdx = lowerBound(this.events, now);
         this._pending = [];
+        this._probation.length = 0;
         this.streak = 0;
         for (var i = 0; i < this.rocks.length; i++) this.scene.remove(this.rocks[i].mesh);
         this.rocks.length = 0;
-        this._clearAttack();
+        this._clearAttacks();
         this._attackScanIdx = 0;
         this._beatIdx = 0;
         for (var j = 0; j < this.events.length; j++) {
@@ -437,7 +480,10 @@
         if (this.streak > this.bestStreak) this.bestStreak = this.streak;
         var x = this._laneX(ev.s, mirrored);
         this._burst(x, 0.5, 0, 8, 4, 3);
-        if (this.attack && this.attack.mesh && ev.t >= this.attack.launchTime) this.attack.hits++;
+        for (var ai = 0; ai < this.attacks.length; ai++) {
+            var atkH = this.attacks[ai];
+            if (atkH.mesh && ev.t >= atkH.launchTime && ev.t <= atkH.impactTime) atkH.hits++;
+        }
         if (this.streak % STREAK_STEP === 0 && this.bossState === 'alive') {
             this._throwRock(x, 1 + Math.min(2, this.streak / 25));
             this._toast(this.streak + ' STREAK!', '#ffd166');
@@ -447,23 +493,49 @@
     BossFightGame.prototype._onMiss = function (ev) {
         if (this.streak >= STREAK_STEP) this._toast('STREAK BROKEN', '#ef4444');
         this.streak = 0;
-        if (this.attack && this.attack.mesh && ev && ev.t >= this.attack.launchTime) this.attack.misses++;
+        if (ev) {
+            for (var ai = 0; ai < this.attacks.length; ai++) {
+                var atkM = this.attacks[ai];
+                if (atkM.mesh && ev.t >= atkM.launchTime && ev.t <= atkM.impactTime) atkM.misses++;
+            }
+        }
         this._eyeMat.emissiveIntensity = 5;   // boss eyes flare
         if (this.settings.shake) this._shake = Math.max(this._shake, 0.25);
     };
 
     BossFightGame.prototype._judge = function (now, getNoteState, mirrored) {
+        var i, ev, raw, state;
+
+        // Auto-hit resolves instantly at the strike line, but real scorers
+        // (note_detect etc.) report verdicts 60-300 ms AFTER the note time —
+        // so auto-hit would win the race on every note and the scorer would
+        // never be detected. Recently auto-hit notes therefore stay on
+        // "probation": keep re-querying them, and the moment ANY real verdict
+        // appears, hand judging over to the scorer for good.
+        if (getNoteState && !this._sawScorer && this._probation.length) {
+            for (i = this._probation.length - 1; i >= 0; i--) {
+                ev = this._probation[i].ev;
+                raw = getNoteState(ev.note, ev.chordTime);
+                if (raw && (typeof raw === 'string' ? raw : raw.state)) {
+                    this._sawScorer = true;
+                    this._probation.length = 0;
+                    break;
+                }
+                if (now > this._probation[i].until) this._probation.splice(i, 1);
+            }
+        }
+
         // move newly-due events into the pending window
         while (this._judgeIdx < this.events.length && this.events[this._judgeIdx].t <= now) {
             this._pending.push(this.events[this._judgeIdx]);
             this._judgeIdx++;
         }
         // resolve pending events
-        for (var i = this._pending.length - 1; i >= 0; i--) {
-            var ev = this._pending[i];
-            var state = null;
+        for (i = this._pending.length - 1; i >= 0; i--) {
+            ev = this._pending[i];
+            state = null;
             if (getNoteState) {
-                var raw = getNoteState(ev.note, ev.chordTime);
+                raw = getNoteState(ev.note, ev.chordTime);
                 if (raw) {
                     state = typeof raw === 'string' ? raw : raw.state;
                     if (state) this._sawScorer = true;
@@ -472,7 +544,10 @@
             var resolved = null;
             if (state === 'hit' || state === 'active') resolved = 'hit';
             else if (state === 'miss') resolved = 'miss';
-            else if (!this._sawScorer && this.settings.autohit) resolved = 'hit';
+            else if (!this._sawScorer && this.settings.autohit) {
+                resolved = 'hit';
+                this._probation.push({ ev: ev, until: ev.t + 0.8 });
+            }
             else if (now - ev.t > GRACE) resolved = 'miss';
 
             if (resolved) {
@@ -521,6 +596,10 @@
             b.position.y = Math.sin(t * 1.3) * 0.6;
             b.rotation.y = Math.sin(t * 0.4) * 0.25;
             b.scale.setScalar(1);
+            if (!this._raged && this.bossHp / this.bossMaxHp < 0.35) {
+                this._raged = true;
+                this._toast('ENRAGED!', '#ff4444');
+            }
         } else if (this.bossState === 'dying') {
             this._bossStateT += dt;
             var k = Math.min(1, this._bossStateT / 2.2);
@@ -532,7 +611,7 @@
                 this.bossHp = this.bossMaxHp;
                 this.bossState = 'spawning';
                 this._bossStateT = 0;
-                this._hudBossName.textContent = 'THE GRAVELORD  ✦ LV ' + this.level;
+                this._applyBossDef(BOSS_DEFS[(this.level - 1) % BOSS_DEFS.length]);
             }
         } else { // spawning
             this._bossStateT += dt;
@@ -546,8 +625,9 @@
         this._bossFlash = Math.max(0, this._bossFlash - dt * 3);
         this._bossBodyMat.emissive.setRGB(this._bossFlash * 0.9, this._bossFlash * 0.1, this._bossFlash * 0.05);
 
-        // eye pulse decays back to base
-        this._eyeMat.emissiveIntensity += (2.2 - this._eyeMat.emissiveIntensity) * Math.min(1, dt * 4);
+        // eye pulse decays back to base (brighter while enraged)
+        var eyeBase = this._raged ? 3.6 : 2.2;
+        this._eyeMat.emissiveIntensity += (eyeBase - this._eyeMat.emissiveIntensity) * Math.min(1, dt * 4);
         this.bossLight.intensity = 85 + Math.sin(t * 7) * 12 + this._bossFlash * 120;
 
         for (var i = 0; i < this._debris.length; i++) {
@@ -581,34 +661,49 @@
         }
     };
 
-    // ---------------- beat-synced boss attack ----------------
-    // On a measure boundary (every ATTACK_MEASURES measures) the boss winds up
-    // and hurls a boulder at the player. It launches on the downbeat and lands
-    // exactly 4 beats later. Play that riff cleanly (no miss, enough hits) and
-    // the boulder is deflected back into the boss for heavy damage; flub it and
-    // you get crushed: screen flash, big shake, streak gone.
+    // ---------------- beat-synced boss attacks ----------------
+    // On a measure boundary (every 8 measures — every 4 when enraged) the boss
+    // winds up and launches its archetype's attack pattern. Every projectile
+    // launches on a beat and lands on a beat. Play the riff under a projectile's
+    // flight cleanly (no miss, enough hits) and it is deflected back into the
+    // boss for heavy damage; flub it and you get crushed: screen flash, big
+    // shake, streak gone.
 
     BossFightGame.prototype._scheduleAttack = function (beats, now) {
-        if (!beats || beats.length < 8 || this.bossState !== 'alive') return;
-        var ATTACK_MEASURES = 8;
+        if (!beats || beats.length < 12 || this.bossState !== 'alive') return;
+        var interval = this._raged ? 4 : 8;
         var i = this._attackScanIdx;
-        while (i < beats.length - 4) {
+        while (i < beats.length - 7) {
             var b = beats[i];
             if (b.time > now + 1.0) {
                 var measure = (typeof b.measure === 'number') ? b.measure : -1;
-                var onBoundary = measure >= 0 ? (measure > 0 && measure % ATTACK_MEASURES === 0 && (i === 0 || beats[i - 1].measure !== measure))
-                                              : (i % (ATTACK_MEASURES * 4) === 0);
+                var onBoundary = measure >= 0 ? (measure > 0 && measure % interval === 0 && (i === 0 || beats[i - 1].measure !== measure))
+                                              : (i % (interval * 4) === 0);
                 if (onBoundary) {
-                    this.attack = {
-                        windupTime: b.time - 1.4,
-                        launchTime: b.time,
-                        impactTime: beats[i + 4].time, // lands on the downbeat, 4 beats later
-                        windupShown: false,
-                        mesh: null,
-                        hits: 0,
-                        misses: 0
-                    };
-                    this._attackScanIdx = i + 4;
+                    this._attackBatch++;
+                    var kind = (this._bossDef && this._bossDef.attack) || 'boulder';
+                    var entries = [];
+                    if (kind === 'volley') {
+                        for (var k = 0; k < 3; k++) {
+                            entries.push({ launchTime: beats[i + k].time, impactTime: beats[i + k + 3].time, size: 0.55, power: 2, overhead: false });
+                        }
+                    } else if (kind === 'meteor') {
+                        entries.push({ launchTime: b.time, impactTime: beats[i + 2].time, size: 1.3, power: 3, overhead: true });
+                        entries.push({ launchTime: beats[i + 2].time, impactTime: beats[i + 4].time, size: 1.3, power: 3, overhead: true });
+                    } else {
+                        entries.push({ launchTime: b.time, impactTime: beats[i + 4].time, size: 1.0, power: 4, overhead: false });
+                    }
+                    for (var e = 0; e < entries.length; e++) {
+                        var en = entries[e];
+                        en.kind = kind;
+                        en.batch = this._attackBatch;
+                        en.windupTime = b.time - 1.4;
+                        en.mesh = null;
+                        en.hits = 0;
+                        en.misses = 0;
+                        this.attacks.push(en);
+                    }
+                    this._attackScanIdx = i + 7;
                     return;
                 }
             }
@@ -617,72 +712,76 @@
         this._attackScanIdx = i;
     };
 
-    BossFightGame.prototype._clearAttack = function () {
-        if (this.attack && this.attack.mesh) this.scene.remove(this.attack.mesh);
-        this.attack = null;
+    BossFightGame.prototype._clearAttacks = function () {
+        for (var i = 0; i < this.attacks.length; i++) {
+            if (this.attacks[i].mesh) this.scene.remove(this.attacks[i].mesh);
+        }
+        this.attacks.length = 0;
     };
 
-    BossFightGame.prototype._updateAttack = function (beats, now, dt) {
+    BossFightGame.prototype._updateAttacks = function (beats, now, dt) {
         var THREE = this.THREE;
-        if (!this.attack) {
+        if (!this.attacks.length) {
             this._scheduleAttack(beats, now);
             return;
         }
-        var a = this.attack;
+        for (var i = this.attacks.length - 1; i >= 0; i--) {
+            var a = this.attacks[i];
 
-        if (!a.windupShown && now >= a.windupTime) {
-            a.windupShown = true;
-            this._eyeMat.emissiveIntensity = 6;
-            this._toast('⚠ INCOMING RIFF', '#f97316');
-        }
-
-        if (!a.mesh && now >= a.launchTime) {
-            if (!this._boulderGeo) {
-                this._boulderGeo = this._track(new THREE.DodecahedronGeometry(1.6, 1));
-                this._boulderMat = this._mat({ color: 0x6b5f52, roughness: 0.85, flatShading: true, emissive: 0xff3300, emissiveIntensity: 0.25 });
+            if (this._warnedBatch !== a.batch && now >= a.windupTime) {
+                this._warnedBatch = a.batch;
+                this._eyeMat.emissiveIntensity = 6;
+                var warn = a.kind === 'volley' ? '⚠ BOULDER VOLLEY'
+                         : a.kind === 'meteor' ? '⚠ METEOR DROP'
+                         : '⚠ INCOMING RIFF';
+                this._toast(warn, '#f97316');
             }
-            a.mesh = new THREE.Mesh(this._boulderGeo, this._boulderMat);
-            a.from = new THREE.Vector3(this.boss.position.x, 11, BOSS_Z + 3);
-            a.to = new THREE.Vector3(0, 2.4, 9); // just in front of the camera
-            this.scene.add(a.mesh);
-            if (this.settings.shake) this._shake = Math.max(this._shake, 0.2);
-        }
 
-        if (a.mesh && now < a.impactTime) {
-            var k = Math.max(0, Math.min(1, (now - a.launchTime) / Math.max(0.001, a.impactTime - a.launchTime)));
-            a.mesh.position.lerpVectors(a.from, a.to, k);
-            a.mesh.position.y += Math.sin(k * Math.PI) * 7;
-            a.mesh.rotation.x += dt * 5;
-            a.mesh.rotation.y += dt * 4;
-            var grow = 1 + k * 0.8;
-            a.mesh.scale.setScalar(grow);
-        }
+            if (!a.mesh && now >= a.launchTime) {
+                a.mesh = new THREE.Mesh(this._boulderGeo, this._boulderMat);
+                a.from = a.overhead
+                    ? new THREE.Vector3((Math.random() - 0.5) * 10, 30, -16)
+                    : new THREE.Vector3(this.boss.position.x, 11, BOSS_Z + 3);
+                a.to = new THREE.Vector3((Math.random() - 0.5) * 3, 2.4, 9); // just in front of the camera
+                this.scene.add(a.mesh);
+                if (this.settings.shake) this._shake = Math.max(this._shake, 0.15);
+            }
 
-        if (now >= a.impactTime) {
-            // how many notes fell inside the riff window?
-            var expected = lowerBound(this.events, a.impactTime) - lowerBound(this.events, a.launchTime);
-            var success = a.misses === 0 && (expected === 0 || a.hits >= Math.ceil(expected * 0.5));
-            if (a.mesh) {
-                if (success) {
-                    this._burst(a.mesh.position.x, a.mesh.position.y, a.mesh.position.z, 30, 10, 7);
-                    this._toast('DEFLECTED!', '#22c55e');
-                    // send it back for heavy counter damage
-                    this.rocks.push({
-                        mesh: a.mesh, t: 0, power: 4,
-                        from: a.mesh.position.clone(),
-                        to: new THREE.Vector3(0, 9, BOSS_Z + 2)
-                    });
-                    a.mesh = null; // ownership handed to rocks
-                } else {
-                    this._toast('CRUSHED!', '#ef4444');
-                    this.streak = 0;
-                    this._flashTimer = 0.6;
-                    this._hudFlash.style.opacity = '1';
-                    if (this.settings.shake) this._shake = Math.max(this._shake, 1.0);
-                    this.scene.remove(a.mesh);
+            if (a.mesh && now < a.impactTime) {
+                var k2 = Math.max(0, Math.min(1, (now - a.launchTime) / Math.max(0.001, a.impactTime - a.launchTime)));
+                a.mesh.position.lerpVectors(a.from, a.to, k2);
+                if (!a.overhead) a.mesh.position.y += Math.sin(k2 * Math.PI) * 7;
+                a.mesh.rotation.x += dt * 5;
+                a.mesh.rotation.y += dt * 4;
+                a.mesh.scale.setScalar(a.size * (1 + k2 * 0.6));
+            }
+
+            if (now >= a.impactTime) {
+                // how many notes fell inside this projectile's riff window?
+                var expected = lowerBound(this.events, a.impactTime) - lowerBound(this.events, a.launchTime);
+                var success = a.misses === 0 && (expected === 0 || a.hits >= Math.ceil(expected * 0.5));
+                if (a.mesh) {
+                    if (success) {
+                        this._burst(a.mesh.position.x, a.mesh.position.y, a.mesh.position.z, 24, 9, 6);
+                        this._toast('DEFLECTED!', '#22c55e');
+                        // send it back for heavy counter damage
+                        this.rocks.push({
+                            mesh: a.mesh, t: 0, power: a.power,
+                            from: a.mesh.position.clone(),
+                            to: new THREE.Vector3(0, 9, BOSS_Z + 2)
+                        });
+                        a.mesh = null; // ownership handed to rocks
+                    } else {
+                        this._toast('CRUSHED!', '#ef4444');
+                        this.streak = 0;
+                        this._flashTimer = 0.6;
+                        this._hudFlash.style.opacity = '1';
+                        if (this.settings.shake) this._shake = Math.max(this._shake, 1.0);
+                        this.scene.remove(a.mesh);
+                    }
                 }
+                this.attacks.splice(i, 1);
             }
-            this._clearAttack();
         }
     };
 
@@ -784,7 +883,7 @@
             this._beatsRef = bundle.beats;
             this._attackScanIdx = 0;
             this._beatIdx = 0;
-            this._clearAttack();
+            this._clearAttacks();
         }
         // seek (backwards, or a big forward jump) → don't batch-judge skipped notes
         if (now < this._lastNow - 0.75 || now > this._lastNow + 2) this._resetJudging(now);
@@ -808,7 +907,7 @@
         if (this._strikeMat) this._strikeMat.emissiveIntensity = 1.0 + this._beatPulse * 1.8;
 
         this._updateBoss(dt, now);
-        this._updateAttack(beats, now, dt);
+        this._updateAttacks(beats, now, dt);
         this._updateRocks(dt, chartDt);
         this._updateParticles(dt);
         this._drawNotes(now, mirrored);
