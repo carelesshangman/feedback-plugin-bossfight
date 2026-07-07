@@ -17,6 +17,7 @@
     'use strict';
 
     var PLUGIN_ID = 'bossfight';
+    var PLUGIN_VERSION = '0.2.1'; // keep in sync with plugin.json
 
     // ------------------------------------------------------------------
     // three.js loader — vendored ES module under assets/. Resolve relative
@@ -394,6 +395,7 @@
             '<div style="position:absolute;left:18px;bottom:16px;">' +
               '<div data-bf="streak" style="font-size:34px;font-weight:800;color:#9aa0ff;text-shadow:0 0 10px #55f;">0</div>' +
               '<div style="font-size:11px;letter-spacing:2px;opacity:.7;">STREAK</div>' +
+              '<div style="font-size:9px;letter-spacing:1px;opacity:.35;margin-top:4px;">BOSSFIGHT v' + PLUGIN_VERSION + '</div>' +
             '</div>' +
             '<div data-bf="toast" style="position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);' +
               'font-size:40px;font-weight:900;letter-spacing:2px;opacity:0;transition:opacity .25s;text-shadow:0 0 14px #fa0;"></div>' +
