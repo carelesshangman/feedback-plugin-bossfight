@@ -356,7 +356,10 @@
             '<div data-bf="toast" style="position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);' +
               'font-size:40px;font-weight:900;letter-spacing:2px;opacity:0;transition:opacity .25s;text-shadow:0 0 14px #fa0;"></div>' +
             '<div data-bf="flash" style="position:absolute;inset:0;opacity:0;transition:opacity .12s;' +
-              'background:radial-gradient(ellipse at center,rgba(220,30,20,0) 35%,rgba(220,30,20,.75) 100%);"></div>';
+              'background:radial-gradient(ellipse at center,rgba(220,30,20,0) 35%,rgba(220,30,20,.75) 100%);"></div>' +
+            '<div data-bf="auto" style="position:absolute;right:14px;top:12px;display:none;' +
+              'font-size:11px;letter-spacing:1.5px;padding:3px 8px;border:1px solid #666;border-radius:4px;' +
+              'color:#aab;background:rgba(10,10,22,.6);">AUTO-HIT · no note detection</div>';
 
         host.appendChild(hud);
         this._hud = hud;
@@ -365,6 +368,8 @@
         this._hudToast = hud.querySelector('[data-bf="toast"]');
         this._hudBossName = hud.querySelector('[data-bf="bossname"]');
         this._hudFlash = hud.querySelector('[data-bf="flash"]');
+        this._hudAuto = hud.querySelector('[data-bf="auto"]');
+        this._hudAutoVal = null;
         this._hudStreakVal = -1;
         this._hudHpVal = -1;
         this._toastTimer = 0;
@@ -810,6 +815,11 @@
         this._drawBeats(beats, now);
 
         // HUD (write only on change)
+        var autoActive = !!this.settings.autohit && !this._sawScorer;
+        if (autoActive !== this._hudAutoVal) {
+            this._hudAutoVal = autoActive;
+            this._hudAuto.style.display = autoActive ? '' : 'none';
+        }
         if (this.streak !== this._hudStreakVal) {
             this._hudStreakVal = this.streak;
             this._hudStreak.textContent = String(this.streak);
