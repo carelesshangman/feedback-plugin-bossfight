@@ -39,6 +39,8 @@
   var hpParam = parseInt(params.get('hp'), 10);
   if (hpParam > 0) window.__bossfightOverrides = { baseHp: hpParam };
   var timeScale = parseFloat(params.get('speed')) || 1;
+  // ?nomiss=1 → perfect play, streak only grows (for watching the spell tiers)
+  var noMiss = params.has('nomiss');
 
   // ---------------- synthetic chart ----------------
   var BPM = 120, BEAT = 60 / BPM, SONG_LEN = 180;
@@ -84,6 +86,7 @@
   var fumble = 0;
   function roll(list) {
     for (var i = 0; i < list.length; i++) {
+      if (noMiss) { list[i].__roll = 'hit'; continue; }
       if (fumble > 0) { list[i].__roll = 'miss'; fumble--; continue; }
       if (Math.random() < 0.06) { list[i].__roll = 'miss'; fumble = Math.random() < 0.5 ? 1 : 0; }
       else list[i].__roll = 'hit';
@@ -126,6 +129,7 @@
   }
 
   inst.init(canvas);
+  window.__demoInst = inst;
   fit();
   window.addEventListener('resize', fit);
 

@@ -8,15 +8,20 @@ through the foreground and the boss looms in the background.
 
 ## Gameplay
 
-- **Streaks attack.** Every 5 consecutive correct notes hurls a rock at the boss, and damage
-  scales with the length of your streak. Drop the boss to zero HP and it dies. The next
-  archetype then spawns a level higher with 30% more HP.
+- **Streaks attack, and the spells grow with you.** Every 5 consecutive correct notes casts
+  at the boss, and damage scales with the length of your streak. Up to 14 streak you lob
+  **fireballs** with ember trails. From 15 you call **lightning strikes** down from the sky.
+  From 25 you launch **curses**, slow corkscrewing orbs that poison the boss with damage
+  ticking over time. Drop the boss to zero HP and it dies. The next archetype then spawns a
+  level higher with 30% more HP.
 - **Three boss archetypes** cycle as levels climb, each with its own silhouette, palette and
   beat-synced attack:
-  - **The Gravelord**: one huge boulder. Launches on the downbeat, lands 4 beats later.
-  - **Storm Wraith**: a volley of three rocks launched on consecutive beats, each in flight
-    for 3 beats (overlapping riff windows).
-  - **Pyre Fiend**: two heavy meteors dropped from overhead, fast 2-beat flights back to back.
+  - **The Gravelord**: one huge ember-trailed boulder. Launches on the downbeat, lands 4
+    beats later.
+  - **Storm Wraith**: a volley of three crackling ball-lightning orbs launched on consecutive
+    beats, each in flight for 3 beats (overlapping riff windows).
+  - **Pyre Fiend**: two flaming meteors dropped from overhead, fast 2-beat flights back to
+    back.
 - Every projectile launches on a beat and lands on a beat. Play the riff under its flight
   cleanly (no misses, at least half the notes hit) and it gets **deflected** back into the
   boss for heavy counter-damage. Flub it and you get **crushed**: screen flash, camera shake,
@@ -61,8 +66,9 @@ npm run demo        # serves on http://localhost:8137
 Keys: **Space** pause, **M** fumble (forces misses for 1.5 s, get crushed by the next
 boulder), **R** restart.
 
-URL params: `?hp=20` (weaker bosses, quick level cycling) and `?speed=4` (chart time runs
-4x, handy for watching all archetypes fast).
+URL params: `?hp=20` (weaker bosses, quick level cycling), `?speed=4` (chart time runs 4x,
+handy for watching all archetypes fast) and `?nomiss=1` (perfect play, so the streak climbs
+through every spell tier).
 
 ## How it works
 

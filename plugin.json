@@ -1,7 +1,7 @@
 {
   "id": "bossfight",
   "name": "Boss Fight",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": false,
   "type": "visualization",
   "category": "game",

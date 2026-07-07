@@ -17,7 +17,7 @@
     'use strict';
 
     var PLUGIN_ID = 'bossfight';
-    var PLUGIN_VERSION = '0.2.2'; // keep in sync with plugin.json
+    var PLUGIN_VERSION = '0.3.0'; // keep in sync with plugin.json
 
     // ------------------------------------------------------------------
     // three.js loader. Vendored ES module under assets/. Resolve relative
@@ -59,11 +59,17 @@
     //             flight for 3 beats (overlapping riff windows)
     //  - meteor:  two heavy rocks dropped from overhead, 2-beat flights
     //             back to back
+    // trail: particle color behind that boss's projectiles
+    // flashCss: rgba prefix for the crush screen flash
     var BOSS_DEFS = [
-        { name: 'THE GRAVELORD', body: 0x3d2a55, eye: 0xff7722, light: 0xff5522, geo: 'ico', scaleY: 1.25, attack: 'boulder' },
-        { name: 'STORM WRAITH', body: 0x1c3a4d, eye: 0x66e0ff, light: 0x3388ff, geo: 'octa', scaleY: 1.7, attack: 'volley' },
-        { name: 'PYRE FIEND', body: 0x542020, eye: 0xffd633, light: 0xff3300, geo: 'dodeca', scaleY: 1.05, attack: 'meteor' }
+        { name: 'THE GRAVELORD', body: 0x3d2a55, eye: 0xff7722, light: 0xff5522, geo: 'ico', scaleY: 1.25, attack: 'boulder', trail: 0xffaa66, flashCss: 'rgba(220,30,20,' },
+        { name: 'STORM WRAITH', body: 0x1c3a4d, eye: 0x66e0ff, light: 0x3388ff, geo: 'octa', scaleY: 1.7, attack: 'volley', trail: 0x88ddff, flashCss: 'rgba(90,190,255,' },
+        { name: 'PYRE FIEND', body: 0x542020, eye: 0xffd633, light: 0xff3300, geo: 'dodeca', scaleY: 1.05, attack: 'meteor', trail: 0xff6633, flashCss: 'rgba(255,90,10,' }
     ];
+
+    // player streak attacks escalate: fireballs, then lightning, then curses
+    var TIER_LIGHTNING = 15;
+    var TIER_CURSE = 25;
 
     // Rocksmith-style string colours, low string (s=0) upward.
     var STRING_COLORS = [0xef4444, 0xfacc15, 0x3b82f6, 0xf97316, 0x22c55e, 0xa855f7, 0x14b8a6, 0xe879f9];
@@ -122,6 +128,7 @@
         this._raged = false;       // < 35% HP → attacks twice as often
 
         this.rocks = [];
+        this._curses = [];         // active damage-over-time stacks on the boss
         this._lanes = 6;
 
         // beat-synced boss attacks (projectiles thrown AT the player)
@@ -139,6 +146,7 @@
         this._buildHighway(6);
         this._buildNotePool();
         this._buildParticles();
+        this._buildSpellFx();
         this._buildHud();
         this._applyBossDef(BOSS_DEFS[0]);
     }
@@ -251,6 +259,53 @@
         // shared projectile geometry/material, tinted per archetype
         this._boulderGeo = this._track(new THREE.DodecahedronGeometry(1.6, 1));
         this._boulderMat = this._mat({ color: 0x6b5f52, roughness: 0.85, flatShading: true, emissive: 0xff3300, emissiveIntensity: 0.25 });
+        this._bossFlashCol = new THREE.Color(0xff2211);
+    };
+
+    BossFightGame.prototype._buildSpellFx = function () {
+        var THREE = this.THREE;
+        this._fireGeo = this._track(new THREE.SphereGeometry(0.55, 12, 10));
+        this._fireMat = this._mat({ color: 0xff7722, emissive: 0xff5511, emissiveIntensity: 1.8, roughness: 0.4 });
+        this._curseMat = this._mat({ color: 0x2a1040, emissive: 0xaa33ff, emissiveIntensity: 1.6, roughness: 0.5 });
+        this._orbMat = this._track(new THREE.MeshBasicMaterial({ color: 0x88ddff })); // ball lightning, unlit
+
+        // lightning bolt: a chain of thin bright boxes laid between jitter points
+        this._boltSegs = [];
+        var segGeo = this._track(new THREE.BoxGeometry(0.16, 0.16, 1));
+        this._boltMat = this._track(new THREE.MeshBasicMaterial({ color: 0xcfefff, transparent: true, opacity: 1 }));
+        for (var i = 0; i < 14; i++) {
+            var seg = new THREE.Mesh(segGeo, this._boltMat);
+            seg.visible = false;
+            this.scene.add(seg);
+            this._boltSegs.push(seg);
+        }
+        this._boltLife = 0;
+
+        // one roaming light that follows the newest projectile
+        this._fxLight = new THREE.PointLight(0xffffff, 0, 45, 1.8);
+        this.scene.add(this._fxLight);
+        this._fxTarget = null;
+    };
+
+    BossFightGame.prototype._layBolt = function (a, b) {
+        var n = this._boltSegs.length;
+        var prev = a.clone();
+        for (var i = 0; i < n; i++) {
+            var t = (i + 1) / n;
+            var p = a.clone().lerp(b, t);
+            if (i < n - 1) {
+                p.x += (Math.random() - 0.5) * 3.5;
+                p.z += (Math.random() - 0.5) * 2.5;
+            }
+            var seg = this._boltSegs[i];
+            seg.visible = true;
+            seg.position.copy(prev).lerp(p, 0.5);
+            seg.lookAt(p);
+            seg.scale.set(1, 1, Math.max(0.001, prev.distanceTo(p)));
+            prev = p;
+        }
+        this._boltLife = 0.25;
+        this._boltMat.opacity = 1;
     };
 
     BossFightGame.prototype._applyBossDef = function (def) {
@@ -261,6 +316,9 @@
         this._eyeMat.emissive.setHex(def.eye);
         this.bossLight.color.setHex(def.light);
         this._boulderMat.emissive.setHex(def.light);
+        this._orbMat.color.setHex(def.light);
+        this._hudFlash.style.background =
+            'radial-gradient(ellipse at center,' + def.flashCss + '0) 35%,' + def.flashCss + '.75) 100%)';
         this._raged = false;
         this._hudBossName.textContent = def.name + (this.level > 1 ? '  ✦ LV ' + this.level : '');
     };
@@ -343,36 +401,49 @@
 
     BossFightGame.prototype._buildParticles = function () {
         var THREE = this.THREE;
-        var N = 240;
+        var N = 420;
         this._pN = N;
         this._pPos = new Float32Array(N * 3);
+        this._pCol = new Float32Array(N * 3);
         this._pVel = new Float32Array(N * 3);
         this._pLife = new Float32Array(N);
         for (var i = 0; i < N; i++) this._pPos[i * 3 + 1] = -999;
         var geo = this._track(new THREE.BufferGeometry());
         geo.setAttribute('position', new THREE.BufferAttribute(this._pPos, 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(this._pCol, 3));
         var mat = this._track(new THREE.PointsMaterial({
-            color: 0xffcc88, size: 0.35, transparent: true, opacity: 0.95, depthWrite: false
+            vertexColors: true, size: 0.32, transparent: true, opacity: 0.95,
+            depthWrite: false, blending: THREE.AdditiveBlending
         }));
         var pts = new THREE.Points(geo, mat);
         pts.frustumCulled = false;
         this.scene.add(pts);
         this._points = pts;
         this._pCursor = 0;
+        this._pScratch = new THREE.Color();
     };
 
-    BossFightGame.prototype._burst = function (x, y, z, count, spread, up) {
+    BossFightGame.prototype._emit = function (x, y, z, count, spread, up, colorHex, life) {
+        var c = this._pScratch.setHex(colorHex);
         for (var i = 0; i < count; i++) {
             var idx = this._pCursor;
             this._pCursor = (this._pCursor + 1) % this._pN;
             this._pPos[idx * 3] = x;
             this._pPos[idx * 3 + 1] = y;
             this._pPos[idx * 3 + 2] = z;
+            this._pCol[idx * 3] = c.r;
+            this._pCol[idx * 3 + 1] = c.g;
+            this._pCol[idx * 3 + 2] = c.b;
             this._pVel[idx * 3] = (Math.random() - 0.5) * spread;
             this._pVel[idx * 3 + 1] = Math.random() * up + 2;
             this._pVel[idx * 3 + 2] = (Math.random() - 0.5) * spread;
-            this._pLife[idx] = 0.6 + Math.random() * 0.5;
+            this._pLife[idx] = life * (0.7 + Math.random() * 0.6);
         }
+        this._points.geometry.attributes.color.needsUpdate = true;
+    };
+
+    BossFightGame.prototype._burst = function (x, y, z, count, spread, up, colorHex) {
+        this._emit(x, y, z, count, spread, up, colorHex || 0xffcc88, 0.9);
     };
 
     // ---------------- HUD (DOM overlay, refs cached, never queried per frame) ----------------
@@ -464,6 +535,8 @@
         this.streak = 0;
         for (var i = 0; i < this.rocks.length; i++) this.scene.remove(this.rocks[i].mesh);
         this.rocks.length = 0;
+        this._curses.length = 0;
+        this._fxTarget = null;
         this._clearAttacks();
         this._attackScanIdx = 0;
         this._beatIdx = 0;
@@ -487,8 +560,17 @@
             if (atkH.mesh && ev.t >= atkH.launchTime && ev.t <= atkH.impactTime) atkH.hits++;
         }
         if (this.streak % STREAK_STEP === 0 && this.bossState === 'alive') {
-            this._throwRock(x, 1 + Math.min(2, this.streak / 25));
-            this._toast(this.streak + ' STREAK!', '#ffd166');
+            var power = 1 + Math.min(2, this.streak / 25);
+            if (this.streak >= TIER_CURSE) {
+                this._throwCurse(x, power);
+                this._toast(this.streak + ' STREAK! CURSE', '#bb55ff');
+            } else if (this.streak >= TIER_LIGHTNING) {
+                this._lightningStrike(power);
+                this._toast(this.streak + ' STREAK! LIGHTNING', '#bbf0ff');
+            } else {
+                this._throwFireball(x, power);
+                this._toast(this.streak + ' STREAK!', '#ffd166');
+            }
         }
     };
 
@@ -568,32 +650,77 @@
 
     // ---------------- rocks & boss ----------------
 
-    BossFightGame.prototype._throwRock = function (fromX, power) {
+    BossFightGame.prototype._throwFireball = function (fromX, power) {
         var THREE = this.THREE;
-        if (!this._rockGeo) {
-            this._rockGeo = this._track(new THREE.DodecahedronGeometry(0.8, 0));
-            this._rockMat = this._mat({ color: 0x8a7f70, roughness: 0.9, flatShading: true });
-        }
-        var mesh = new THREE.Mesh(this._rockGeo, this._rockMat);
-        var s = 0.8 + power * 0.35;
-        mesh.scale.setScalar(s);
+        var mesh = new THREE.Mesh(this._fireGeo, this._fireMat);
+        mesh.scale.setScalar(0.9 + power * 0.5);
         this.scene.add(mesh);
         this.rocks.push({
-            mesh: mesh, t: 0, power: power,
+            mesh: mesh, t: 0, power: power, flight: ROCK_FLIGHT,
+            type: 'fire', trailColor: 0xffaa44,
             from: new THREE.Vector3(fromX, 0.6, 0),
             to: new THREE.Vector3((Math.random() - 0.5) * 2, 8 + Math.random() * 4, BOSS_Z + 2)
         });
+        this._fxTarget = mesh;
+        this._fxLight.color.setHex(0xff8833);
     };
 
-    BossFightGame.prototype._damageBoss = function (amount) {
+    BossFightGame.prototype._throwCurse = function (fromX, power) {
+        var THREE = this.THREE;
+        var mesh = new THREE.Mesh(this._fireGeo, this._curseMat);
+        mesh.scale.setScalar(1.2 + power * 0.3);
+        this.scene.add(mesh);
+        this.rocks.push({
+            mesh: mesh, t: 0, power: power, flight: 1.5,
+            type: 'curse', trailColor: 0xbb55ff, spiral: Math.random() * 6,
+            from: new THREE.Vector3(fromX, 0.6, 0),
+            to: new THREE.Vector3(0, 9, BOSS_Z + 2)
+        });
+        this._fxTarget = mesh;
+        this._fxLight.color.setHex(0xaa33ff);
+    };
+
+    BossFightGame.prototype._lightningStrike = function (power) {
+        var THREE = this.THREE;
+        var hit = new THREE.Vector3(this.boss.position.x, this.boss.position.y + 11, BOSS_Z);
+        var top = new THREE.Vector3(hit.x + (Math.random() - 0.5) * 8, 27, hit.z + (Math.random() - 0.5) * 6);
+        this._layBolt(top, hit);
+        this._burst(hit.x, hit.y, hit.z, 26, 8, 6, 0xbbf0ff);
+        this._damageBoss(6 * power * 1.1, 0x99ddff);
+        this._fxTarget = null;
+        this._fxLight.position.copy(hit);
+        this._fxLight.color.setHex(0xbbf0ff);
+        this._fxLight.intensity = 140;
+        if (this.settings.shake) this._shake = Math.max(this._shake, 0.35);
+    };
+
+    BossFightGame.prototype._damageBoss = function (amount, flashHex) {
         if (this.bossState !== 'alive') return;
         this.bossHp = Math.max(0, this.bossHp - amount);
         this._bossFlash = 1;
+        this._bossFlashCol.setHex(flashHex || 0xff2211);
         if (this.settings.shake) this._shake = Math.max(this._shake, 0.5);
         if (this.bossHp <= 0) {
+            this._curses.length = 0;
             this.bossState = 'dying';
             this._bossStateT = 0;
             this._toast('BOSS DOWN!', '#22c55e');
+        }
+    };
+
+    // curse damage-over-time ticks
+    BossFightGame.prototype._updateCurses = function (dt) {
+        for (var i = this._curses.length - 1; i >= 0; i--) {
+            var c = this._curses[i];
+            c.next -= dt;
+            if (c.next <= 0) {
+                c.next = 0.7;
+                c.ticks--;
+                this._damageBoss(c.dmg, 0xaa33ff);
+                var bp = this.boss.position;
+                this._burst(bp.x, bp.y + 8, BOSS_Z, 10, 6, 4, 0xbb55ff);
+                if (c.ticks <= 0) this._curses.splice(i, 1);
+            }
         }
     };
 
@@ -629,9 +756,10 @@
             if (k2 >= 1) this.bossState = 'alive';
         }
 
-        // damage flash
+        // damage flash, tinted by whatever spell landed last
         this._bossFlash = Math.max(0, this._bossFlash - dt * 3);
-        this._bossBodyMat.emissive.setRGB(this._bossFlash * 0.9, this._bossFlash * 0.1, this._bossFlash * 0.05);
+        var fc = this._bossFlashCol;
+        this._bossBodyMat.emissive.setRGB(this._bossFlash * fc.r * 0.9, this._bossFlash * fc.g * 0.9, this._bossFlash * fc.b * 0.9);
 
         // eye pulse decays back to base (brighter while enraged)
         var eyeBase = this._raged ? 3.6 : 2.2;
@@ -652,10 +780,19 @@
     BossFightGame.prototype._updateRocks = function (dt, chartDt) {
         for (var i = this.rocks.length - 1; i >= 0; i--) {
             var r = this.rocks[i];
-            r.t += chartDt / ROCK_FLIGHT;
+            r.t += chartDt / (r.flight || ROCK_FLIGHT);
             if (r.t >= 1) {
-                this._burst(r.to.x, r.to.y, r.to.z, 26, 9, 6);
-                this._damageBoss(6 * r.power);
+                if (r.type === 'curse') {
+                    // the curse takes hold: damage ticks over the next couple seconds
+                    this._curses.push({ ticks: 3, dmg: (6 * r.power * 1.3) / 3, next: 0 });
+                    this._burst(r.to.x, r.to.y, r.to.z, 30, 8, 5, 0xbb55ff);
+                    this._toast('CURSED!', '#bb55ff');
+                } else {
+                    var hitCol = r.type === 'fire' ? 0xffaa44 : (r.trailColor || 0xffcc88);
+                    this._burst(r.to.x, r.to.y, r.to.z, 26, 9, 6, hitCol);
+                    this._damageBoss(6 * r.power, r.type === 'fire' ? 0xff7733 : null);
+                }
+                if (this._fxTarget === r.mesh) this._fxTarget = null;
                 this.scene.remove(r.mesh);
                 this.rocks.splice(i, 1);
                 continue;
@@ -664,8 +801,15 @@
             var m = r.mesh.position;
             m.lerpVectors(r.from, r.to, k);
             m.y += Math.sin(k * Math.PI) * 9; // arc apex
+            if (r.type === 'curse') {
+                // corkscrew toward the boss, tightening as it closes in
+                var s = k * 10 + r.spiral;
+                m.x += Math.cos(s) * 1.3 * (1 - k);
+                m.y += Math.sin(s) * 1.1 * (1 - k);
+            }
             r.mesh.rotation.x += dt * 9;
             r.mesh.rotation.y += dt * 7;
+            this._emit(m.x, m.y, m.z, 2, 1.0, 0.6, r.trailColor || 0xffcc88, 0.4);
         }
     };
 
@@ -746,12 +890,18 @@
             }
 
             if (!a.mesh && now >= a.launchTime) {
-                a.mesh = new THREE.Mesh(this._boulderGeo, this._boulderMat);
+                // volley rocks are ball lightning; boulders and meteors stay stone
+                a.mesh = a.kind === 'volley'
+                    ? new THREE.Mesh(this._fireGeo, this._orbMat)
+                    : new THREE.Mesh(this._boulderGeo, this._boulderMat);
+                a.baseScale = a.kind === 'volley' ? a.size * 2.6 : a.size;
                 a.from = a.overhead
                     ? new THREE.Vector3((Math.random() - 0.5) * 10, 30, -16)
                     : new THREE.Vector3(this.boss.position.x, 11, BOSS_Z + 3);
                 a.to = new THREE.Vector3((Math.random() - 0.5) * 3, 2.4, 9); // just in front of the camera
                 this.scene.add(a.mesh);
+                this._fxTarget = a.mesh;
+                this._fxLight.color.setHex(this._bossDef ? this._bossDef.light : 0xff5522);
                 if (this.settings.shake) this._shake = Math.max(this._shake, 0.15);
             }
 
@@ -759,9 +909,17 @@
                 var k2 = Math.max(0, Math.min(1, (now - a.launchTime) / Math.max(0.001, a.impactTime - a.launchTime)));
                 a.mesh.position.lerpVectors(a.from, a.to, k2);
                 if (!a.overhead) a.mesh.position.y += Math.sin(k2 * Math.PI) * 7;
+                if (a.kind === 'volley') {
+                    // ball lightning crackles around its path
+                    a.mesh.position.x += (Math.random() - 0.5) * 0.5;
+                    a.mesh.position.y += (Math.random() - 0.5) * 0.5;
+                }
                 a.mesh.rotation.x += dt * 5;
                 a.mesh.rotation.y += dt * 4;
-                a.mesh.scale.setScalar(a.size * (1 + k2 * 0.6));
+                a.mesh.scale.setScalar(a.baseScale * (1 + k2 * 0.6));
+                var tc = this._bossDef ? this._bossDef.trail : 0xffaa66;
+                this._emit(a.mesh.position.x, a.mesh.position.y, a.mesh.position.z,
+                    a.kind === 'meteor' ? 3 : 2, 1.2, 0.6, tc, 0.45);
             }
 
             if (now >= a.impactTime) {
@@ -770,11 +928,13 @@
                 var success = a.misses === 0 && (expected === 0 || a.hits >= Math.ceil(expected * 0.5));
                 if (a.mesh) {
                     if (success) {
-                        this._burst(a.mesh.position.x, a.mesh.position.y, a.mesh.position.z, 24, 9, 6);
+                        var dtc = this._bossDef ? this._bossDef.trail : 0xffcc88;
+                        this._burst(a.mesh.position.x, a.mesh.position.y, a.mesh.position.z, 24, 9, 6, dtc);
                         this._toast('DEFLECTED!', '#22c55e');
                         // send it back for heavy counter damage
                         this.rocks.push({
-                            mesh: a.mesh, t: 0, power: a.power,
+                            mesh: a.mesh, t: 0, power: a.power, flight: ROCK_FLIGHT,
+                            type: 'return', trailColor: dtc,
                             from: a.mesh.position.clone(),
                             to: new THREE.Vector3(0, 9, BOSS_Z + 2)
                         });
@@ -922,7 +1082,26 @@
         this._updateBoss(dt, now);
         this._updateAttacks(beats, now, dt);
         this._updateRocks(dt, chartDt);
+        this._updateCurses(dt);
         this._updateParticles(dt);
+
+        // lightning bolt fade
+        if (this._boltLife > 0) {
+            this._boltLife -= dt;
+            this._boltMat.opacity = Math.max(0, this._boltLife / 0.25);
+            if (this._boltLife <= 0) {
+                for (var bs = 0; bs < this._boltSegs.length; bs++) this._boltSegs[bs].visible = false;
+            }
+        }
+
+        // roaming projectile light
+        if (this._fxTarget && this._fxTarget.parent) {
+            this._fxLight.position.copy(this._fxTarget.position);
+            this._fxLight.position.y += 0.5;
+            this._fxLight.intensity = 30;
+        } else {
+            this._fxLight.intensity = Math.max(0, this._fxLight.intensity - dt * 260);
+        }
         this._drawNotes(now, mirrored);
         this._drawBeats(beats, now);
 
@@ -1033,6 +1212,11 @@
 
             getSetting: function (key) {
                 return settings[key];
+            },
+
+            // test seam for the standalone demo, not part of the host contract
+            _debugGame: function () {
+                return game;
             },
 
             destroy: function () {
