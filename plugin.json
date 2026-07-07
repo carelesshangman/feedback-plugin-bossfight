@@ -1,0 +1,29 @@
+{
+  "id": "bossfight",
+  "name": "Boss Fight",
+  "version": "0.1.0",
+  "private": false,
+  "type": "visualization",
+  "category": "game",
+  "description": "Replaces the highway with a 3D boss-fight arena. Hit streaks hurl rocks at the boss; misses break your combo.",
+  "icon": "assets/thumb.svg",
+  "script": "screen.js",
+  "capabilities": {
+    "visualization": {
+      "settings": [
+        {
+          "key": "autohit",
+          "label": "Auto-hit (demo mode, no mic)",
+          "type": "toggle",
+          "default": true
+        },
+        {
+          "key": "shake",
+          "label": "Screen shake",
+          "type": "toggle",
+          "default": true
+        }
+      ]
+    }
+  }
+}

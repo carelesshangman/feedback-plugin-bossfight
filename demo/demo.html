@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Boss Fight — feedBack plugin demo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #080810; overflow: hidden; }
+  #highway { position: relative; width: 100vw; height: 100vh; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #help {
+    position: absolute; right: 14px; bottom: 12px; z-index: 10;
+    font: 12px/1.7 system-ui, sans-serif; color: #9aa; text-align: right;
+    pointer-events: none; text-shadow: 0 1px 3px #000;
+  }
+  #help b { color: #dde; }
+</style>
+</head>
+<body>
+<!-- Mimics the host: the plugin mounts its HUD into the canvas parent. -->
+<div id="highway">
+  <canvas id="cv"></canvas>
+  <div id="help">
+    <b>standalone demo</b> — fake host, synthetic chart, simulated scorer (~94% accuracy)<br>
+    <b>Space</b> pause · <b>M</b> fumble (force misses 1.5s) · <b>R</b> restart
+  </div>
+</div>
+
+<!-- The actual plugin, unmodified -->
+<script src="../screen.js"></script>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------------- synthetic chart ----------------
+  var BPM = 120, BEAT = 60 / BPM, SONG_LEN = 180;
+  var STRINGS = 6;
+
+  var beats = [];
+  for (var i = 0; i * BEAT < SONG_LEN; i++) {
+    beats.push({ time: 2 + i * BEAT, measure: Math.floor(i / 4) });
+  }
+
+  // pentatonic-ish random walk over strings for a riff feel
+  var notes = [], chords = [];
+  var s = 2;
+  for (var b = 4; b < beats.length - 4; b++) {
+    var t = beats[b].time;
+    if (b % 16 === 0) {
+      // power chord on the measure
+      var cn = [
+        { t: t, s: 0, f: 3, sus: BEAT * 1.5, __t: t },
+        { t: t, s: 1, f: 5, sus: BEAT * 1.5, __t: t },
+        { t: t, s: 2, f: 5, sus: BEAT * 1.5, __t: t }
+      ];
+      chords.push({ t: t, notes: cn });
+      continue;
+    }
+    for (var half = 0; half < 2; half++) {
+      if (Math.random() < (half ? 0.45 : 0.8)) {
+        s += Math.round((Math.random() - 0.5) * 3);
+        s = Math.max(0, Math.min(STRINGS - 1, s));
+        notes.push({
+          t: t + half * BEAT / 2, s: s, f: 2 + ((b * 7 + half * 3) % 10),
+          sus: Math.random() < 0.12 ? BEAT : 0,
+          __t: t + half * BEAT / 2
+        });
+      }
+    }
+  }
+
+  // ---------------- simulated scorer ----------------
+  // Pre-roll a verdict per note; verdicts become visible slightly after the
+  // note time, like a real note-detect plugin. ~94% accuracy with occasional
+  // two-note fumbles so streaks break naturally.
+  var fumble = 0;
+  function roll(list) {
+    for (var i = 0; i < list.length; i++) {
+      if (fumble > 0) { list[i].__roll = 'miss'; fumble--; continue; }
+      if (Math.random() < 0.06) { list[i].__roll = 'miss'; fumble = Math.random() < 0.5 ? 1 : 0; }
+      else list[i].__roll = 'hit';
+    }
+  }
+  roll(notes);
+  for (var c = 0; c < chords.length; c++) roll(chords[c].notes);
+
+  var forcedMissUntil = -1;
+
+  function getNoteState(note, chartTime) {
+    if (bundle.currentTime < chartTime + 0.06) return null;
+    if (chartTime <= forcedMissUntil && chartTime >= forcedMissUntil - 1.5) return 'miss';
+    return note.__roll || 'hit';
+  }
+
+  // ---------------- fake host bundle + render loop ----------------
+  var bundle = {
+    currentTime: 0,
+    isReady: true,
+    songInfo: { title: 'Demo Riff', artist: 'Stub Host', arrangement: 'lead' },
+    notes: notes,
+    chords: chords,
+    beats: beats,
+    sections: [],
+    stringCount: STRINGS,
+    lefty: false,
+    inverted: false,
+    getNoteState: getNoteState
+  };
+
+  var canvas = document.getElementById('cv');
+  var inst = window.feedBackViz_bossfight();
+
+  function fit() {
+    var w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = w;
+    canvas.height = h;
+    inst.resize(w, h);
+  }
+
+  inst.init(canvas);
+  fit();
+  window.addEventListener('resize', fit);
+
+  var t0 = performance.now(), pauseAt = null;
+
+  function restart() {
+    t0 = performance.now();
+    forcedMissUntil = -1;
+    if (pauseAt !== null) pauseAt = performance.now();
+  }
+
+  window.addEventListener('keydown', function (e) {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      if (pauseAt === null) pauseAt = performance.now();
+      else { t0 += performance.now() - pauseAt; pauseAt = null; }
+    } else if (e.key === 'm' || e.key === 'M') {
+      forcedMissUntil = bundle.currentTime + 1.5;
+    } else if (e.key === 'r' || e.key === 'R') {
+      restart();
+    }
+  });
+
+  (function tick() {
+    var wall = pauseAt !== null ? pauseAt : performance.now();
+    bundle.currentTime = (wall - t0) / 1000;
+    if (bundle.currentTime > SONG_LEN - 4) restart();
+    inst.draw(bundle);
+    requestAnimationFrame(tick);
+  })();
+})();
+</script>
+</body>
+</html>
