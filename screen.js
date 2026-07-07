@@ -7,7 +7,7 @@
  * foreground and a boss arena as the background. Consecutive correct notes
  * build a streak; every 5-streak milestone hurls a rock at the boss.
  *
- * Hit/miss verdicts come from bundle.getNoteState(note, chartTime) — i.e.
+ * Hit/miss verdicts come from bundle.getNoteState(note, chartTime), meaning
  * whatever scorer plugin (note_detect, virtuoso, ...) has registered a
  * note-state provider. When no scorer is active, the "Auto-hit" per-instance
  * setting (default on) judges every note a hit so the fight is watchable
@@ -20,7 +20,7 @@
     var PLUGIN_VERSION = '0.2.2'; // keep in sync with plugin.json
 
     // ------------------------------------------------------------------
-    // three.js loader — vendored ES module under assets/. Resolve relative
+    // three.js loader. Vendored ES module under assets/. Resolve relative
     // to this script's own URL first (works in host and in demo/), then fall
     // back to the sandboxed plugin asset route.
     // ------------------------------------------------------------------
@@ -52,7 +52,7 @@
     var BOSS_Z = -46;
     var BOSS_BASE_HP = 100;
 
-    // Boss archetypes — cycle as levels climb. Each has its own silhouette,
+    // Boss archetypes, cycling as levels climb. Each has its own silhouette,
     // palette and beat-synced attack pattern:
     //  - boulder: one big rock, launches on the downbeat, lands 4 beats later
     //  - volley:  three smaller rocks launched on consecutive beats, each in
@@ -78,7 +78,7 @@
     }
 
     // ==================================================================
-    // BossFightGame — owns the Three.js scene, HUD DOM and game state.
+    // BossFightGame owns the Three.js scene, HUD DOM and game state.
     // ==================================================================
     function BossFightGame(THREE, canvas) {
         this.THREE = THREE;
@@ -196,7 +196,7 @@
         var THREE = this.THREE;
         var boss = new THREE.Group();
 
-        // one geometry per archetype, created once — _applyBossDef swaps refs
+        // one geometry per archetype, created once; _applyBossDef swaps refs
         this._bossGeos = {
             ico: this._track(new THREE.IcosahedronGeometry(4.2, 1)),
             octa: this._track(new THREE.OctahedronGeometry(4.6, 1)),
@@ -248,7 +248,7 @@
         this.scene.add(boss);
         this.boss = boss;
 
-        // shared projectile geometry/material — tinted per archetype
+        // shared projectile geometry/material, tinted per archetype
         this._boulderGeo = this._track(new THREE.DodecahedronGeometry(1.6, 1));
         this._boulderMat = this._mat({ color: 0x6b5f52, roughness: 0.85, flatShading: true, emissive: 0xff3300, emissiveIntensity: 0.25 });
     };
@@ -375,7 +375,7 @@
         }
     };
 
-    // ---------------- HUD (DOM overlay, refs cached — never queried per frame) ----------------
+    // ---------------- HUD (DOM overlay, refs cached, never queried per frame) ----------------
 
     BossFightGame.prototype._buildHud = function () {
         var host = this.canvas.parentElement || document.body;
@@ -515,7 +515,7 @@
         var i, ev, raw, state;
 
         // Auto-hit resolves instantly at the strike line, but real scorers
-        // (note_detect etc.) report verdicts 60-300 ms AFTER the note time —
+        // (note_detect etc.) report verdicts 60-300 ms AFTER the note time,
         // so auto-hit would win the race on every note and the scorer would
         // never be detected. Recently auto-hit notes therefore stay on
         // "probation": keep re-querying them, and the moment ANY real verdict
@@ -647,7 +647,7 @@
         }
     };
 
-    // chartDt (chart-time delta) keeps projectiles in sync with the song —
+    // chartDt (chart-time delta) keeps projectiles in sync with the song:
     // they pause when playback pauses and stay beat-consistent under frame hitches.
     BossFightGame.prototype._updateRocks = function (dt, chartDt) {
         for (var i = this.rocks.length - 1; i >= 0; i--) {
@@ -670,7 +670,7 @@
     };
 
     // ---------------- beat-synced boss attacks ----------------
-    // On a measure boundary (every 8 measures — every 4 when enraged) the boss
+    // On a measure boundary (every 8 measures, every 4 when enraged) the boss
     // winds up and launches its archetype's attack pattern. Every projectile
     // launches on a beat and lands on a beat. Play the riff under a projectile's
     // flight cleanly (no miss, enough hits) and it is deflected back into the
@@ -824,7 +824,7 @@
             gem.material = mat;
             gem.position.set(x, 0.35, z);
 
-            // NOTE: materials are shared per string — animate transform only.
+            // NOTE: materials are shared per string, so animate transform only.
             if (ev.judged === 'hit' && ev.t <= now) {
                 // pop at the strike line: quick grow, then gone
                 var age = (now - ev.t) / 0.22;
@@ -979,7 +979,7 @@
     };
 
     // ==================================================================
-    // setRenderer contract — window.feedBackViz_bossfight
+    // setRenderer contract: window.feedBackViz_bossfight
     // ==================================================================
     window['feedBackViz_' + PLUGIN_ID] = function () {
         var game = null;

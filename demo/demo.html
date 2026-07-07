@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Boss Fight — feedBack plugin demo</title>
+<title>Boss Fight (feedBack plugin demo)</title>
 <style>
   html, body { margin: 0; height: 100%; background: #080810; overflow: hidden; }
   #highway { position: relative; width: 100vw; height: 100vh; }
@@ -20,7 +20,7 @@
 <div id="highway">
   <canvas id="cv"></canvas>
   <div id="help">
-    <b>standalone demo</b> — fake host, synthetic chart, simulated scorer (~94% accuracy)<br>
+    <b>standalone demo</b>: fake host, synthetic chart, simulated scorer (~94% accuracy)<br>
     <b>Space</b> pause · <b>M</b> fumble (force misses 1.5s) · <b>R</b> restart
   </div>
 </div>
@@ -33,8 +33,8 @@
   'use strict';
 
   // ?hp=25 → weaker bosses so archetype cycling is quick to observe
-  // ?speed=3 → chart time runs 3× real time (smooth per-frame steps, unlike
-  //            a seek, so judging/streaks behave normally — just faster)
+  // ?speed=3 → chart time runs 3x real time (smooth per-frame steps, unlike
+  //            a seek, so judging and streaks behave normally, just faster)
   var params = new URLSearchParams(location.search);
   var hpParam = parseInt(params.get('hp'), 10);
   if (hpParam > 0) window.__bossfightOverrides = { baseHp: hpParam };

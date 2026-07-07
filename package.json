@@ -1,7 +1,7 @@
 {
   "name": "feedback-plugin-bossfight",
   "version": "0.1.0",
-  "description": "feedBack visualization plugin: 3D boss-fight arena — hit streaks hurl rocks at the boss, beat-synced boulders come back at you.",
+  "description": "feedBack visualization plugin: 3D boss-fight arena. Hit streaks hurl rocks at the boss, beat-synced boulders come back at you.",
   "private": true,
   "scripts": {
     "vendor": "node -e \"require('fs').copyFileSync('node_modules/three/build/three.module.min.js', 'assets/three.module.js')\"",
